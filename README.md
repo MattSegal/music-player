@@ -1,6 +1,6 @@
 # Music Player
 
-Live website [here](https://mattdegal.github.io/music-player)
+Live website [here](https://mattsegal.github.io/music-player)
 
 This app is intended for musicians who want to listen to a section of a song on repeat so that they can hear it better.
 

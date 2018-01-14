@@ -1,15 +1,23 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Music</title>
+    <title>Music Player</title>
     <link rel="stylesheet" type="text/css" href="./style.css">
 </head>
 <body>
-    <h1>Music</h1>
-    <input type="file" id="file-input">
-    <button id="play-btn" disabled="disabled">Play</button>
-    <button id="stop-btn">Stop</button>
-    <canvas id="canvas"></canvas>
+    <h1 class="header">Music Player</h1>
+    <div class="top">
+        <input type="file" id="file-input">
+        <div class="controls">
+            <button id="play-btn" disabled="disabled">Play</button>
+            <button id="stop-btn">Stop</button>
+        </div>
+    </div>
+    <div class="canvas-container">
+        <canvas id="background-canvas"></canvas>
+        <canvas id="amplitude-canvas"></canvas>
+        <canvas id="cursor-canvas"></canvas>
+    </div>
     <script type="text/javascript" src="./main.js"></script>
 </body>
 </html>

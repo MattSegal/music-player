@@ -1,0 +1,24 @@
+{
+  "name": "music-player",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "webpack --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MattSegal/music-player.git"
+  },
+  "author": "Matt Segal",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MattSegal/music-player/issues"
+  },
+  "homepage": "https://github.com/MattSegal/music-player",
+  "devDependencies": {
+    "babel-core": "^6.26.0",
+    "babel-loader": "^7.1.2",
+    "babel-preset-stage-1": "^6.24.1",
+    "webpack": "^3.10.0"
+  }
+}

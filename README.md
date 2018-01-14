@@ -13,3 +13,16 @@ It would be also nice to:
 
 * pitch shift the song 
 * apply custom frequency filters to the song
+
+# Development
+
+Source files are in `src`, static files and build output are in `docs` (so that GitHub pages can find it).
+
+To get started build the JavaScript:
+
+```
+npm install
+npm run dev
+```
+
+Then open the app in your browser via `/docs/index.html`

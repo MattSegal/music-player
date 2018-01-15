@@ -1,31 +1,23 @@
-/*
-https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API
-consider using
-    https://developer.mozilla.org/en-US/docs/Web/API/ScriptProcessorNode
-    for visualization
+import AudioThing from './audio'
 
-*/
+// Disable / enable buttons
+const disable = el =>  el.setAttribute('disabled', 'disabled')
+const enable = el => el.removeAttribute('disabled')
 
-import Canvas from './canvas'
-
-
-// GET DAT DOM
+// Get the DOM input elements
 const fileInput = document.getElementById('file-input')
-const audio = document.getElementById('audio')
 const playButton = document.getElementById('play-btn')
 const stopButton = document.getElementById('stop-btn')
+const pauseButton = document.getElementById('pause-btn')
 
-// Some HTML5 crap
-const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+// This thing reads the file
 const fileReader = new FileReader()
-const canvas = new Canvas()
 
+// This thing does everything else
+const audioThing = new AudioThing()
 
-// Audio globals
-let source
-let audioBuffer
-
-// Step 1 - file is uploaded and read into an ArrayBuffer
+// Step 1 - User uploads a file
+// and then we read it into an ArrayBuffer
 const handleFileInput = () => {
     const files = fileInput.files
     if (!files.length > 0) {
@@ -34,71 +26,48 @@ const handleFileInput = () => {
     fileReader.readAsArrayBuffer(files[0])
 }
 
-// Step 2- ArrayBuffer is ready and decoded from compressed form
+// Step 2- ArrayBuffer is read
+// and then we process it
 const handleFileRead = () => {
-    if (fileReader.readyState == 2) { // DONE
-        audioContext.decodeAudioData(fileReader.result, handleAudioDecoded)
+    // Check if DONE
+    if (fileReader.readyState == 2) {
+      audioThing.processArrayBuffer(fileReader.result)
     }
 }
 
-// Step 3 - decoded buffer is ready to play
-const handleAudioDecoded = buffer => {
-    audioBuffer = buffer
-    processBuffer().then(() =>
-      playBuffer()
-    )
+// Step 3 - ArrayBuffer is processed
+// and the user can now play music
+const handleAudioReady = () => {
+  enable(playButton)
 }
 
-// User clicks play first play
+// User clicks play
 const handlePlayClick = e => {
-    playBuffer()
-    playButton.setAttribute('disabled', 'disabled')
+    disable(playButton)
+    enable(stopButton)
+    enable(pauseButton)
+    audioThing.play()
 }
 
-// User clicks stop first play
+// User clicks stop
 const handleStopClick = e => {
-    source.stop()   
-    playButton.removeAttribute('disabled')
+    enable(playButton)
+    disable(stopButton)
+    disable(pauseButton)
+    audioThing.stop()   
 }
 
-const processBuffer = () => {
-  const offlineContext = new OfflineAudioContext({
-    numberOfChannels: audioBuffer.numberOfChannels,
-    length: audioBuffer.length,
-    sampleRate: audioBuffer.sampleRate,
-  })
-  const bufferSize = 4096
-  const scriptProcessor = offlineContext.createScriptProcessor(bufferSize, 2, 2)
-  const offlineSource = offlineContext.createBufferSource()
-  scriptProcessor.onaudioprocess = canvas.drawWaveform
-  offlineSource.buffer = audioBuffer
-  offlineSource.connect(scriptProcessor)
-  scriptProcessor.connect(offlineContext.destination)
-  offlineSource.start()
-  canvas.prepareDraw(audioBuffer, bufferSize)
-  return offlineContext.startRendering()
+// User clicks pause
+const handlePauseClick = e => {
+    enable(playButton)
+    disable(stopButton)
+    disable(pauseButton)
+    audioThing.pause()
 }
 
-const playBuffer = () => {
-    source = audioContext.createBufferSource()
-    source.buffer = audioBuffer
-
-    const bufferSize = 4096
-    const scriptProcessor = audioContext.createScriptProcessor(bufferSize, 2, 1)
-    scriptProcessor.onaudioprocess = canvas.drawPlay
-    source.connect(scriptProcessor)
-    scriptProcessor.connect(audioContext.destination)
-    canvas.prepareDrawPlay()
-    source.start(0)
-    source.onended = () => {
-      scriptProcessor.disconnect()
-      canvas.reDrawWaveform()
-    }
-}
-
-
+audioThing.onready = handleAudioReady
 playButton.onclick = handlePlayClick
 stopButton.onclick = handleStopClick
+pauseButton.onclick = handlePauseClick
 fileInput.onchange = handleFileInput
 fileReader.onloadend = handleFileRead
-

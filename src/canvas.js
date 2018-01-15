@@ -1,10 +1,11 @@
 const GREY = 'rgb(238, 238, 238)'
-const PLAYED_GREY = 'rgb(255, 230, 230)'
+const PLAYED_PINK = 'rgb(255, 230, 230)'
 const BLACK = 'rgb(50, 50, 50)'
 const RED = 'rgb(230, 0, 0)'
 const WHITE = 'rgb(255, 255, 255)'
 const BLUE = 'rgb(0, 255, 255)'
 const CLEAR_BLUE = 'rgba(0, 255, 255, 0.3)'
+const PROCESSING_BLUE = 'rgb(160, 240, 240)'
 
 
 class BaseCanvas {
@@ -51,7 +52,7 @@ class WaveformCanvas extends BaseCanvas {
 
 
 class CursorCanvas extends BaseCanvas {
-  // Draw mouse cursor animations and handle user events
+  // Draw mouse cursor animations and handle user interactions
   constructor(domId, order) {
     super(domId, order)
     this.canvas.onmousemove = this.handleCursorMove
@@ -81,24 +82,56 @@ class CursorCanvas extends BaseCanvas {
     this.mouseIsDown = true
     this.startX = e.clientX
   }
+  
   handleMouseUp = e => {
     this.mouseIsDown = false
+    const endX = e.clientX
+    let start, end
+    if (endX > this.startX) {
+      start = this.startX / this.canvas.clientWidth
+      end = endX / this.canvas.clientWidth
+    } else {
+      start = endX / this.canvas.clientWidth
+      end = this.startX / this.canvas.clientWidth
+    }
+    this.onregionselect(start, end)
+  }
+}
+
+
+class TextOverlay {
+  // Allows us to display text messages on the player
+  constructor() {
+    this.textEl = document.getElementById('text-overlay')
+    this.textEl.style.zIndex = -1
+  }
+  write = text => {
+    this.textEl.innerText = text
+    this.textEl.style.zIndex = 3
+  }
+  clear = () => {
+    this.textEl.innerText = ''
+    this.textEl.style.zIndex = -1
   }
 }
 
 
 export default class Canvas {
-  constructor() {
+  constructor(onregionselect) {
+    this.text = new TextOverlay()
     this.canvas = {
       bg: new BackgroundCanvas('background-canvas', 0),
       amp: new WaveformCanvas('amplitude-canvas', 1),
       cur: new CursorCanvas('cursor-canvas', 2),
     }
     this.canvas.bg.clear()
+    this.text.write('Upload a file')
+    this.canvas.cur.onregionselect = onregionselect
   }
 
-  prepareDraw = (rawBuffer, bufferSize) => {
-    // Prepare to draw the waveform
+  startProcessing = (rawBuffer, bufferSize) => {
+    // Prepare to read the waveform into memory
+    this.text.write('Processing...')
     this.canvas.bg.clear()
     this.canvas.amp.clear()
     this.numBuckets = rawBuffer.length / bufferSize
@@ -107,8 +140,8 @@ export default class Canvas {
     this.bucketArray = new Float32Array(this.numBuckets)
   }
 
-  drawWaveform = (audioEvent) => {
-    // Draw a subsection of the waveform
+  proccessWaveform = audioEvent => {
+    // Read a section of the waveform into a bucket
     const agg = (a, b) => Math.abs(a) + Math.abs(b)
     const sum = (
       audioEvent.inputBuffer.getChannelData(0).reduce(agg) + 
@@ -117,13 +150,15 @@ export default class Canvas {
     const avg = sum / (2 * audioEvent.inputBuffer.length)
     this.bucketArray[this.bucketCount] = avg
     const played = this.bucketCount / this.numBuckets
-    this.canvas.amp.drawBar(played, avg, this.bucketWidth, BLACK)
+    this.canvas.bg.fillPlayed(played, PROCESSING_BLUE)
     this.bucketCount++
   }
 
-  reDrawWaveform = () => {
-    this.canvas.bg.clear()
+  drawWaveform = () => {
+    // Render the waveform to the canvas
+    this.text.clear()
     this.canvas.amp.clear()
+    this.canvas.bg.clear()    
     this.bucketCount = 0
     while (this.bucketCount < this.numBuckets) {
       const played = this.bucketCount / this.numBuckets
@@ -133,18 +168,19 @@ export default class Canvas {
   }
 
   prepareDrawPlay = () => {
+    // Get ready to draw the play animation
     this.bucketCount = 0
+    this.text.clear()
   }
 
-  drawPlay = (audioEvent) => {
-    // Draw 'played' color onto waveform as the track player
-    // pass audio data through to output
+  drawPlay = audioEvent => {
+    // Draw the 'play' animation
     const played = this.bucketCount / this.numBuckets
     this.canvas.amp.drawBar(played, this.bucketArray[this.bucketCount], this.bucketWidth, RED)
-    this.canvas.bg.fillPlayed(played, PLAYED_GREY)
+    this.canvas.bg.fillPlayed(played, PLAYED_PINK)
     this.bucketCount++
 
-    // Pass data through to source
+    // We must pass the audio data through to the player
     let inputBuffer = audioEvent.inputBuffer
     let outputBuffer = audioEvent.outputBuffer
     for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {

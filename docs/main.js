@@ -69,33 +69,27 @@
 
 "use strict";
 Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__canvas__ = __webpack_require__(1);
-/*
-https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API
-consider using
-    https://developer.mozilla.org/en-US/docs/Web/API/ScriptProcessorNode
-    for visualization
-
-*/
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__audio__ = __webpack_require__(2);
 
 
+// Disable / enable buttons
+const disable = el => el.setAttribute('disabled', 'disabled');
+const enable = el => el.removeAttribute('disabled');
 
-// GET DAT DOM
+// Get the DOM input elements
 const fileInput = document.getElementById('file-input');
-const audio = document.getElementById('audio');
 const playButton = document.getElementById('play-btn');
 const stopButton = document.getElementById('stop-btn');
+const pauseButton = document.getElementById('pause-btn');
 
-// Some HTML5 crap
-const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+// This thing reads the file
 const fileReader = new FileReader();
-const canvas = new __WEBPACK_IMPORTED_MODULE_0__canvas__["a" /* default */]();
 
-// Audio globals
-let source;
-let audioBuffer;
+// This thing does everything else
+const audioThing = new __WEBPACK_IMPORTED_MODULE_0__audio__["a" /* default */]();
 
-// Step 1 - file is uploaded and read into an ArrayBuffer
+// Step 1 - User uploads a file
+// and then we read it into an ArrayBuffer
 const handleFileInput = () => {
     const files = fileInput.files;
     if (!files.length > 0) {
@@ -104,69 +98,49 @@ const handleFileInput = () => {
     fileReader.readAsArrayBuffer(files[0]);
 };
 
-// Step 2- ArrayBuffer is ready and decoded from compressed form
+// Step 2- ArrayBuffer is read
+// and then we process it
 const handleFileRead = () => {
+    // Check if DONE
     if (fileReader.readyState == 2) {
-        // DONE
-        audioContext.decodeAudioData(fileReader.result, handleAudioDecoded);
+        audioThing.processArrayBuffer(fileReader.result);
     }
 };
 
-// Step 3 - decoded buffer is ready to play
-const handleAudioDecoded = buffer => {
-    audioBuffer = buffer;
-    processBuffer().then(() => playBuffer());
+// Step 3 - ArrayBuffer is processed
+// and the user can now play music
+const handleAudioReady = () => {
+    enable(playButton);
 };
 
-// User clicks play first play
+// User clicks play
 const handlePlayClick = e => {
-    playBuffer();
-    playButton.setAttribute('disabled', 'disabled');
+    disable(playButton);
+    enable(stopButton);
+    enable(pauseButton);
+    audioThing.play();
 };
 
-// User clicks stop first play
+// User clicks stop
 const handleStopClick = e => {
-    source.stop();
-    playButton.removeAttribute('disabled');
+    enable(playButton);
+    disable(stopButton);
+    disable(pauseButton);
+    audioThing.stop();
 };
 
-const processBuffer = () => {
-    const offlineContext = new OfflineAudioContext({
-        numberOfChannels: audioBuffer.numberOfChannels,
-        length: audioBuffer.length,
-        sampleRate: audioBuffer.sampleRate
-    });
-    const bufferSize = 4096;
-    const scriptProcessor = offlineContext.createScriptProcessor(bufferSize, 2, 2);
-    const offlineSource = offlineContext.createBufferSource();
-    scriptProcessor.onaudioprocess = canvas.drawWaveform;
-    offlineSource.buffer = audioBuffer;
-    offlineSource.connect(scriptProcessor);
-    scriptProcessor.connect(offlineContext.destination);
-    offlineSource.start();
-    canvas.prepareDraw(audioBuffer, bufferSize);
-    return offlineContext.startRendering();
+// User clicks pause
+const handlePauseClick = e => {
+    enable(playButton);
+    disable(stopButton);
+    disable(pauseButton);
+    audioThing.pause();
 };
 
-const playBuffer = () => {
-    source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-
-    const bufferSize = 4096;
-    const scriptProcessor = audioContext.createScriptProcessor(bufferSize, 2, 1);
-    scriptProcessor.onaudioprocess = canvas.drawPlay;
-    source.connect(scriptProcessor);
-    scriptProcessor.connect(audioContext.destination);
-    canvas.prepareDrawPlay();
-    source.start(0);
-    source.onended = () => {
-        scriptProcessor.disconnect();
-        canvas.reDrawWaveform();
-    };
-};
-
+audioThing.onready = handleAudioReady;
 playButton.onclick = handlePlayClick;
 stopButton.onclick = handleStopClick;
+pauseButton.onclick = handlePauseClick;
 fileInput.onchange = handleFileInput;
 fileReader.onloadend = handleFileRead;
 
@@ -176,12 +150,13 @@ fileReader.onloadend = handleFileRead;
 
 "use strict";
 const GREY = 'rgb(238, 238, 238)';
-const PLAYED_GREY = 'rgb(255, 230, 230)';
+const PLAYED_PINK = 'rgb(255, 230, 230)';
 const BLACK = 'rgb(50, 50, 50)';
 const RED = 'rgb(230, 0, 0)';
 const WHITE = 'rgb(255, 255, 255)';
 const BLUE = 'rgb(0, 255, 255)';
 const CLEAR_BLUE = 'rgba(0, 255, 255, 0.3)';
+const PROCESSING_BLUE = 'rgb(160, 240, 240)';
 
 class BaseCanvas {
   // Wraps a HTML5 <canvas> element
@@ -234,7 +209,7 @@ class WaveformCanvas extends BaseCanvas {
 }
 
 class CursorCanvas extends BaseCanvas {
-  // Draw mouse cursor animations and handle user events
+  // Draw mouse cursor animations and handle user interactions
   constructor(domId, order) {
     super(domId, order);
 
@@ -261,6 +236,16 @@ class CursorCanvas extends BaseCanvas {
 
     this.handleMouseUp = e => {
       this.mouseIsDown = false;
+      const endX = e.clientX;
+      let start, end;
+      if (endX > this.startX) {
+        start = this.startX / this.canvas.clientWidth;
+        end = endX / this.canvas.clientWidth;
+      } else {
+        start = endX / this.canvas.clientWidth;
+        end = this.startX / this.canvas.clientWidth;
+      }
+      this.onregionselect(start, end);
     };
 
     this.canvas.onmousemove = this.handleCursorMove;
@@ -272,10 +257,29 @@ class CursorCanvas extends BaseCanvas {
 
 }
 
-class Canvas {
+class TextOverlay {
+  // Allows us to display text messages on the player
   constructor() {
-    this.prepareDraw = (rawBuffer, bufferSize) => {
-      // Prepare to draw the waveform
+    this.write = text => {
+      this.textEl.innerText = text;
+      this.textEl.style.zIndex = 3;
+    };
+
+    this.clear = () => {
+      this.textEl.innerText = '';
+      this.textEl.style.zIndex = -1;
+    };
+
+    this.textEl = document.getElementById('text-overlay');
+    this.textEl.style.zIndex = -1;
+  }
+}
+
+class Canvas {
+  constructor(onregionselect) {
+    this.startProcessing = (rawBuffer, bufferSize) => {
+      // Prepare to read the waveform into memory
+      this.text.write('Processing...');
       this.canvas.bg.clear();
       this.canvas.amp.clear();
       this.numBuckets = rawBuffer.length / bufferSize;
@@ -284,20 +288,22 @@ class Canvas {
       this.bucketArray = new Float32Array(this.numBuckets);
     };
 
-    this.drawWaveform = audioEvent => {
-      // Draw a subsection of the waveform
+    this.proccessWaveform = audioEvent => {
+      // Read a section of the waveform into a bucket
       const agg = (a, b) => Math.abs(a) + Math.abs(b);
       const sum = audioEvent.inputBuffer.getChannelData(0).reduce(agg) + audioEvent.inputBuffer.getChannelData(1).reduce(agg);
       const avg = sum / (2 * audioEvent.inputBuffer.length);
       this.bucketArray[this.bucketCount] = avg;
       const played = this.bucketCount / this.numBuckets;
-      this.canvas.amp.drawBar(played, avg, this.bucketWidth, BLACK);
+      this.canvas.bg.fillPlayed(played, PROCESSING_BLUE);
       this.bucketCount++;
     };
 
-    this.reDrawWaveform = () => {
-      this.canvas.bg.clear();
+    this.drawWaveform = () => {
+      // Render the waveform to the canvas
+      this.text.clear();
       this.canvas.amp.clear();
+      this.canvas.bg.clear();
       this.bucketCount = 0;
       while (this.bucketCount < this.numBuckets) {
         const played = this.bucketCount / this.numBuckets;
@@ -307,18 +313,19 @@ class Canvas {
     };
 
     this.prepareDrawPlay = () => {
+      // Get ready to draw the play animation
       this.bucketCount = 0;
+      this.text.clear();
     };
 
     this.drawPlay = audioEvent => {
-      // Draw 'played' color onto waveform as the track player
-      // pass audio data through to output
+      // Draw the 'play' animation
       const played = this.bucketCount / this.numBuckets;
       this.canvas.amp.drawBar(played, this.bucketArray[this.bucketCount], this.bucketWidth, RED);
-      this.canvas.bg.fillPlayed(played, PLAYED_GREY);
+      this.canvas.bg.fillPlayed(played, PLAYED_PINK);
       this.bucketCount++;
 
-      // Pass data through to source
+      // We must pass the audio data through to the player
       let inputBuffer = audioEvent.inputBuffer;
       let outputBuffer = audioEvent.outputBuffer;
       for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
@@ -330,16 +337,125 @@ class Canvas {
       }
     };
 
+    this.text = new TextOverlay();
     this.canvas = {
       bg: new BackgroundCanvas('background-canvas', 0),
       amp: new WaveformCanvas('amplitude-canvas', 1),
       cur: new CursorCanvas('cursor-canvas', 2)
     };
     this.canvas.bg.clear();
+    this.text.write('Upload a file');
+    this.canvas.cur.onregionselect = onregionselect;
   }
 
 }
 /* harmony export (immutable) */ __webpack_exports__["a"] = Canvas;
+
+
+/***/ }),
+/* 2 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__canvas__ = __webpack_require__(1);
+
+
+// This thing plays and proccesses the music
+const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+class AudioThing {
+  constructor() {
+    this.play = () => {
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+        return;
+      }
+
+      this.createSource();
+      this.source.start(0);
+    };
+
+    this.pause = () => {
+      audioContext.suspend();
+    };
+
+    this.stop = () => {
+      this.source.stop();
+    };
+
+    this.handleRegionSelect = (start, end) => {
+      console.log('selected', start, 'to', end);
+
+      // this.start = (this.end - this.start) * start
+      // this.end = (this.end - this.start) * end
+
+      if (this.source && audioContext.state === 'running') {
+        this.source.stop();
+      }
+
+      this.createSource();
+      this.source.loop = true;
+      this.source.loopStart = this.buffer.duration * start;
+      this.source.loopEnd = this.buffer.duration * end;
+      this.source.start(0, this.source.loopStart);
+    };
+
+    this.processArrayBuffer = arrayBuffer => {
+      // Decompress audio data
+      audioContext.decodeAudioData(arrayBuffer, this.handleArrayBufferDecoded);
+    };
+
+    this.handleArrayBufferDecoded = buffer => {
+      // Handle decompressed audio data
+      this.buffer = buffer;
+      this.processBuffer().then(() => this.onready());
+    };
+
+    this.processBuffer = () => {
+      const offlineContext = new OfflineAudioContext({
+        numberOfChannels: this.buffer.numberOfChannels,
+        length: this.buffer.length,
+        sampleRate: this.buffer.sampleRate
+      });
+      const scriptProcessor = offlineContext.createScriptProcessor(this.bufferSize, 2, 2);
+      const offlineSource = offlineContext.createBufferSource();
+
+      this.canvas.startProcessing(this.buffer, this.bufferSize);
+      scriptProcessor.onaudioprocess = this.canvas.proccessWaveform;
+
+      offlineSource.buffer = this.buffer;
+      offlineSource.connect(scriptProcessor);
+      scriptProcessor.connect(offlineContext.destination);
+      offlineSource.start();
+      return offlineContext.startRendering().then(() => new Promise(resolve => {
+        this.canvas.drawWaveform();
+        resolve();
+      }));
+    };
+
+    this.createSource = () => {
+      this.source = audioContext.createBufferSource();
+      this.source.buffer = this.buffer;
+      this.source.connect(audioContext.destination);
+      // const scriptProcessor = audioContext.createScriptProcessor(this.bufferSize, 2, 1)
+      // scriptProcessor.onaudioprocess = this.canvas.drawPlay
+      // this.source.connect(scriptProcessor)
+      // scriptProcessor.connect(audioContext.destination)
+      // this.canvas.prepareDrawPlay()
+      this.source.onended = () => {
+        // scriptProcessor.disconnect()
+        // this.canvas.drawWaveform()
+      };
+    };
+
+    this.bufferSize = 4096;
+    this.canvas = new __WEBPACK_IMPORTED_MODULE_0__canvas__["a" /* default */](this.handleRegionSelect);
+    this.start = 0;
+    this.end = 1;
+  }
+
+}
+/* harmony export (immutable) */ __webpack_exports__["a"] = AudioThing;
 
 
 /***/ })

@@ -49,6 +49,12 @@ const handlePlayClick = e => {
     audioThing.play()
 }
 
+audioThing.onregionselect = () => {
+    disable(playButton)
+    enable(stopButton)
+    enable(pauseButton)
+}
+
 // User clicks stop
 const handleStopClick = e => {
     enable(playButton)

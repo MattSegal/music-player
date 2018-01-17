@@ -34,6 +34,41 @@ class BackgroundCanvas extends BaseCanvas {
 }
 
 
+class FrameCanvas extends BaseCanvas {
+  constructor(domId, order) {
+    super(domId, order)
+    this.canvas.onclick = () => this.onframepop()
+  }
+
+  // Draws the frame stack
+  drawFrameStack = frameStack => {
+    if (frameStack.length > 4) {
+      throw Error('Frame stack has max 4 frames ')
+    }
+    // Ignore base frame (0, 1)
+    const stack = frameStack.slice(1)
+    this.clear()
+    const height = this.canvas.height / 3
+    for (let i = 0; i < stack.length; i++) {
+      const width = (stack[i][1] - stack[i][0]) * this.canvas.width
+      const x = stack[i][0] * this.canvas.width
+      const y = i * height
+
+      this.ctx.fillStyle = GREY
+      this.ctx.fillRect(0, y, this.canvas.width, height)
+      this.ctx.fillStyle = this.frameColors[i]
+      this.ctx.fillRect(x, y, width, height)
+    }
+  }
+
+  frameColors = {
+    0: 'rgb(160, 240, 240)',
+    1: 'rgb(100, 200, 200)',
+    2: 'rgb(50, 150, 150)',
+  }
+}
+
+
 class WaveformCanvas extends BaseCanvas {
   // Draws the music player waveform
   drawBar = (played, amplitude, width, color) => {
@@ -117,16 +152,18 @@ class TextOverlay {
 
 
 export default class Canvas {
-  constructor(onregionselect) {
+  constructor(onregionselect, onframepop) {
     this.text = new TextOverlay()
     this.canvas = {
       bg: new BackgroundCanvas('background-canvas', 0),
       amp: new WaveformCanvas('amplitude-canvas', 1),
       cur: new CursorCanvas('cursor-canvas', 2),
+      frame: new FrameCanvas('frame-canvas', 0)
     }
     this.canvas.bg.clear()
     this.text.write('Upload a file')
     this.canvas.cur.onregionselect = onregionselect
+    this.canvas.frame.onframepop = onframepop
   }
 
   startProcessing = (rawBuffer, bufferSize) => {
@@ -134,10 +171,9 @@ export default class Canvas {
     this.text.write('Processing...')
     this.canvas.bg.clear()
     this.canvas.amp.clear()
-    this.numBuckets = rawBuffer.length / bufferSize
-    this.bucketWidth = this.canvas.bg.canvas.width / this.numBuckets
-    this.bucketCount = 0
+    this.numBuckets = Math.floor(rawBuffer.length / bufferSize)
     this.bucketArray = new Float32Array(this.numBuckets)
+    this.bucketCount = 0
   }
 
   proccessWaveform = audioEvent => {
@@ -154,33 +190,61 @@ export default class Canvas {
     this.bucketCount++
   }
 
-  drawWaveform = () => {
+  redraw = () => {
     // Render the waveform to the canvas
+    if (!(this.startBucketCount + this.endBucketCount)) {
+      throw Error('Must setup draw before redraw')
+    }
     this.text.clear()
+    this.canvas.bg.clear()
     this.canvas.amp.clear()
-    this.canvas.bg.clear()    
-    this.bucketCount = 0
-    while (this.bucketCount < this.numBuckets) {
-      const played = this.bucketCount / this.numBuckets
-      this.canvas.amp.drawBar(played, this.bucketArray[this.bucketCount], this.bucketWidth, BLACK)
-      this.bucketCount++
+    let bucketCount = this.startBucketCount
+    while (bucketCount < this.endBucketCount) {
+      const played = (bucketCount - this.startBucketCount) / this.numBucketsInFrame
+      const val = this.bucketArray[bucketCount] / this.maxVal
+      this.canvas.amp.drawBar(played, val, this.bucketWidth, BLACK)
+      bucketCount++
     }
   }
 
-  prepareDrawPlay = () => {
+  setupDraw = (start, end) => {
     // Get ready to draw the play animation
-    this.bucketCount = 0
-    this.text.clear()
+    if (this.numBuckets < 1) {
+      throw Error('Must process waveform before setting up draw')
+    }
+
+    this.start = start
+    this.end = end
+    this.startBucketCount = Math.floor(this.numBuckets * start)
+    this.endBucketCount = Math.floor(this.numBuckets * end)
+    this.bucketCount = this.startBucketCount
+    this.bucketWidth = this.canvas.bg.canvas.width / (this.endBucketCount - this.startBucketCount)
+    this.numBucketsInFrame = this.endBucketCount - this.startBucketCount
+    this.maxVal = this.bucketArray
+      .slice(this.startBucketCount, this.endBucketCount)
+      .reduce((a, b) => Math.max(a, b))
+    this.redraw()
   }
 
   drawPlay = audioEvent => {
+    if (this.bucketCount > this.endBucketCount) {
+      this.redraw()
+      this.bucketCount = this.startBucketCount
+    }
+
     // Draw the 'play' animation
-    const played = this.bucketCount / this.numBuckets
-    this.canvas.amp.drawBar(played, this.bucketArray[this.bucketCount], this.bucketWidth, RED)
+    const played = (this.bucketCount - this.startBucketCount) / this.numBucketsInFrame
+    const val = this.bucketArray[this.bucketCount] / this.maxVal
+    this.canvas.amp.drawBar(played, val, this.bucketWidth, RED)
     this.canvas.bg.fillPlayed(played, PLAYED_PINK)
     this.bucketCount++
 
     // We must pass the audio data through to the player
+    this.copyAudioData(audioEvent)
+  }
+
+  copyAudioData = audioEvent => {
+    // Copy input data into output so that the music plays
     let inputBuffer = audioEvent.inputBuffer
     let outputBuffer = audioEvent.outputBuffer
     for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
@@ -190,5 +254,9 @@ export default class Canvas {
         outputData[sample] = inputData[sample];
       }
     }
+  }
+
+  drawFrameStack = frameStack => {
+    this.canvas.frame.drawFrameStack(frameStack)
   }
 }

@@ -69,7 +69,7 @@
 
 "use strict";
 Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__audio__ = __webpack_require__(2);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__audio__ = __webpack_require__(1);
 
 
 // Disable / enable buttons
@@ -121,6 +121,12 @@ const handlePlayClick = e => {
     audioThing.play();
 };
 
+audioThing.onregionselect = () => {
+    disable(playButton);
+    enable(stopButton);
+    enable(pauseButton);
+};
+
 // User clicks stop
 const handleStopClick = e => {
     enable(playButton);
@@ -146,6 +152,148 @@ fileReader.onloadend = handleFileRead;
 
 /***/ }),
 /* 1 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__canvas__ = __webpack_require__(2);
+
+
+// This thing plays and proccesses the music
+const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+class AudioThing {
+  constructor() {
+    this.play = () => {
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+        return;
+      }
+
+      // Start from the start of the current frame
+      const frame = this.frameStack[this.frameStack.length - 1];
+      this.createSource(frame[0], frame[1]);
+      this.source.start(0);
+    };
+
+    this.pause = () => {
+      audioContext.suspend();
+    };
+
+    this.stop = () => {
+      this.source.stop();
+    };
+
+    this.handleRegionSelect = (start, end) => {
+      if (this.frameStack.length > 3) {
+        return;
+      }
+      if (end - start < 0.01) {
+        return;
+      }
+      if (end > 0.96) {
+        end = 1;
+      }
+      if (start < 0.04) {
+        start = 0;
+      }
+      const frame = this.frameStack[this.frameStack.length - 1];
+      const currentFrameSize = frame[1] - frame[0];
+      const frameStart = frame[0] + currentFrameSize * start;
+      const frameEnd = frame[0] + currentFrameSize * end;
+      this.frameStack.push([frameStart, frameEnd]);
+      this.canvas.drawFrameStack(this.frameStack);
+
+      this.createSource(frameStart, frameEnd);
+      this.source.loop = true;
+      this.source.loopStart = this.buffer.duration * frameStart;
+      this.source.loopEnd = this.buffer.duration * frameEnd;
+      this.source.start(0, this.source.loopStart);
+      this.onregionselect();
+    };
+
+    this.handleFramePop = () => {
+      if (this.frameStack.length < 2) {
+        return;
+      }
+      this.frameStack.pop();
+      const frame = this.frameStack[this.frameStack.length - 1];
+      const frameStart = frame[0];
+      const frameEnd = frame[1];
+      this.canvas.drawFrameStack(this.frameStack);
+      this.createSource(frameStart, frameEnd);
+      this.source.loop = true;
+      this.source.loopStart = this.buffer.duration * frameStart;
+      this.source.loopEnd = this.buffer.duration * frameEnd;
+      this.source.start(0, this.source.loopStart);
+    };
+
+    this.processArrayBuffer = arrayBuffer => {
+      // Decompress audio data
+      audioContext.decodeAudioData(arrayBuffer, this.handleArrayBufferDecoded);
+    };
+
+    this.handleArrayBufferDecoded = buffer => {
+      // Handle decompressed audio data
+      this.buffer = buffer;
+      this.processBuffer().then(() => this.onready());
+    };
+
+    this.processBuffer = () => {
+      const offlineContext = new OfflineAudioContext({
+        numberOfChannels: this.buffer.numberOfChannels,
+        length: this.buffer.length,
+        sampleRate: this.buffer.sampleRate
+      });
+      const scriptProcessor = offlineContext.createScriptProcessor(this.bufferSize, 2, 2);
+      const offlineSource = offlineContext.createBufferSource();
+
+      this.canvas.startProcessing(this.buffer, this.bufferSize);
+      scriptProcessor.onaudioprocess = this.canvas.proccessWaveform;
+
+      offlineSource.buffer = this.buffer;
+      offlineSource.connect(scriptProcessor);
+      scriptProcessor.connect(offlineContext.destination);
+      offlineSource.start();
+      return offlineContext.startRendering().then(() => new Promise(resolve => {
+        this.canvas.setupDraw(0, 1);
+        resolve();
+      }));
+    };
+
+    this.createSource = (start, end) => {
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      if (this.source) {
+        this.source.stop();
+      }
+      this.source = audioContext.createBufferSource();
+      this.source.buffer = this.buffer;
+
+      this.canvas.setupDraw(start, end);
+      const scriptProcessor = audioContext.createScriptProcessor(this.bufferSize, 2, 1);
+      scriptProcessor.onaudioprocess = this.canvas.drawPlay;
+      this.source.connect(scriptProcessor);
+      scriptProcessor.connect(audioContext.destination);
+
+      this.source.onended = () => {
+        scriptProcessor.disconnect();
+        this.canvas.redraw();
+      };
+    };
+
+    this.bufferSize = 4096;
+    this.canvas = new __WEBPACK_IMPORTED_MODULE_0__canvas__["a" /* default */](this.handleRegionSelect, this.handleFramePop);
+    this.frameStack = [];
+    this.frameStack.push([0, 1]); // start, end
+  }
+
+}
+/* harmony export (immutable) */ __webpack_exports__["a"] = AudioThing;
+
+
+/***/ }),
+/* 2 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -187,6 +335,41 @@ class BackgroundCanvas extends BaseCanvas {
   // Draws the music player background
 
 
+}
+
+class FrameCanvas extends BaseCanvas {
+  constructor(domId, order) {
+    super(domId, order);
+
+    this.drawFrameStack = frameStack => {
+      if (frameStack.length > 4) {
+        throw Error('Frame stack has max 4 frames ');
+      }
+      // Ignore base frame (0, 1)
+      const stack = frameStack.slice(1);
+      this.clear();
+      const height = this.canvas.height / 3;
+      for (let i = 0; i < stack.length; i++) {
+        const width = (stack[i][1] - stack[i][0]) * this.canvas.width;
+        const x = stack[i][0] * this.canvas.width;
+        const y = i * height;
+
+        this.ctx.fillStyle = GREY;
+        this.ctx.fillRect(0, y, this.canvas.width, height);
+        this.ctx.fillStyle = this.frameColors[i];
+        this.ctx.fillRect(x, y, width, height);
+      }
+    };
+
+    this.frameColors = {
+      0: 'rgb(160, 240, 240)',
+      1: 'rgb(100, 200, 200)',
+      2: 'rgb(50, 150, 150)'
+    };
+    this.canvas.onclick = () => this.onframepop();
+  }
+
+  // Draws the frame stack
 }
 
 class WaveformCanvas extends BaseCanvas {
@@ -276,16 +459,15 @@ class TextOverlay {
 }
 
 class Canvas {
-  constructor(onregionselect) {
+  constructor(onregionselect, onframepop) {
     this.startProcessing = (rawBuffer, bufferSize) => {
       // Prepare to read the waveform into memory
       this.text.write('Processing...');
       this.canvas.bg.clear();
       this.canvas.amp.clear();
-      this.numBuckets = rawBuffer.length / bufferSize;
-      this.bucketWidth = this.canvas.bg.canvas.width / this.numBuckets;
-      this.bucketCount = 0;
+      this.numBuckets = Math.floor(rawBuffer.length / bufferSize);
       this.bucketArray = new Float32Array(this.numBuckets);
+      this.bucketCount = 0;
     };
 
     this.proccessWaveform = audioEvent => {
@@ -299,33 +481,59 @@ class Canvas {
       this.bucketCount++;
     };
 
-    this.drawWaveform = () => {
+    this.redraw = () => {
       // Render the waveform to the canvas
+      if (!(this.startBucketCount + this.endBucketCount)) {
+        throw Error('Must setup draw before redraw');
+      }
       this.text.clear();
-      this.canvas.amp.clear();
       this.canvas.bg.clear();
-      this.bucketCount = 0;
-      while (this.bucketCount < this.numBuckets) {
-        const played = this.bucketCount / this.numBuckets;
-        this.canvas.amp.drawBar(played, this.bucketArray[this.bucketCount], this.bucketWidth, BLACK);
-        this.bucketCount++;
+      this.canvas.amp.clear();
+      let bucketCount = this.startBucketCount;
+      while (bucketCount < this.endBucketCount) {
+        const played = (bucketCount - this.startBucketCount) / this.numBucketsInFrame;
+        const val = this.bucketArray[bucketCount] / this.maxVal;
+        this.canvas.amp.drawBar(played, val, this.bucketWidth, BLACK);
+        bucketCount++;
       }
     };
 
-    this.prepareDrawPlay = () => {
+    this.setupDraw = (start, end) => {
       // Get ready to draw the play animation
-      this.bucketCount = 0;
-      this.text.clear();
+      if (this.numBuckets < 1) {
+        throw Error('Must process waveform before setting up draw');
+      }
+
+      this.start = start;
+      this.end = end;
+      this.startBucketCount = Math.floor(this.numBuckets * start);
+      this.endBucketCount = Math.floor(this.numBuckets * end);
+      this.bucketCount = this.startBucketCount;
+      this.bucketWidth = this.canvas.bg.canvas.width / (this.endBucketCount - this.startBucketCount);
+      this.numBucketsInFrame = this.endBucketCount - this.startBucketCount;
+      this.maxVal = this.bucketArray.slice(this.startBucketCount, this.endBucketCount).reduce((a, b) => Math.max(a, b));
+      this.redraw();
     };
 
     this.drawPlay = audioEvent => {
+      if (this.bucketCount > this.endBucketCount) {
+        this.redraw();
+        this.bucketCount = this.startBucketCount;
+      }
+
       // Draw the 'play' animation
-      const played = this.bucketCount / this.numBuckets;
-      this.canvas.amp.drawBar(played, this.bucketArray[this.bucketCount], this.bucketWidth, RED);
+      const played = (this.bucketCount - this.startBucketCount) / this.numBucketsInFrame;
+      const val = this.bucketArray[this.bucketCount] / this.maxVal;
+      this.canvas.amp.drawBar(played, val, this.bucketWidth, RED);
       this.canvas.bg.fillPlayed(played, PLAYED_PINK);
       this.bucketCount++;
 
       // We must pass the audio data through to the player
+      this.copyAudioData(audioEvent);
+    };
+
+    this.copyAudioData = audioEvent => {
+      // Copy input data into output so that the music plays
       let inputBuffer = audioEvent.inputBuffer;
       let outputBuffer = audioEvent.outputBuffer;
       for (let channel = 0; channel < outputBuffer.numberOfChannels; channel++) {
@@ -337,125 +545,25 @@ class Canvas {
       }
     };
 
+    this.drawFrameStack = frameStack => {
+      this.canvas.frame.drawFrameStack(frameStack);
+    };
+
     this.text = new TextOverlay();
     this.canvas = {
       bg: new BackgroundCanvas('background-canvas', 0),
       amp: new WaveformCanvas('amplitude-canvas', 1),
-      cur: new CursorCanvas('cursor-canvas', 2)
+      cur: new CursorCanvas('cursor-canvas', 2),
+      frame: new FrameCanvas('frame-canvas', 0)
     };
     this.canvas.bg.clear();
     this.text.write('Upload a file');
     this.canvas.cur.onregionselect = onregionselect;
+    this.canvas.frame.onframepop = onframepop;
   }
 
 }
 /* harmony export (immutable) */ __webpack_exports__["a"] = Canvas;
-
-
-/***/ }),
-/* 2 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__canvas__ = __webpack_require__(1);
-
-
-// This thing plays and proccesses the music
-const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
-class AudioThing {
-  constructor() {
-    this.play = () => {
-      if (audioContext.state === 'suspended') {
-        audioContext.resume();
-        return;
-      }
-
-      this.createSource();
-      this.source.start(0);
-    };
-
-    this.pause = () => {
-      audioContext.suspend();
-    };
-
-    this.stop = () => {
-      this.source.stop();
-    };
-
-    this.handleRegionSelect = (start, end) => {
-      console.log('selected', start, 'to', end);
-
-      // this.start = (this.end - this.start) * start
-      // this.end = (this.end - this.start) * end
-
-      if (this.source && audioContext.state === 'running') {
-        this.source.stop();
-      }
-
-      this.createSource();
-      this.source.loop = true;
-      this.source.loopStart = this.buffer.duration * start;
-      this.source.loopEnd = this.buffer.duration * end;
-      this.source.start(0, this.source.loopStart);
-    };
-
-    this.processArrayBuffer = arrayBuffer => {
-      // Decompress audio data
-      audioContext.decodeAudioData(arrayBuffer, this.handleArrayBufferDecoded);
-    };
-
-    this.handleArrayBufferDecoded = buffer => {
-      // Handle decompressed audio data
-      this.buffer = buffer;
-      this.processBuffer().then(() => this.onready());
-    };
-
-    this.processBuffer = () => {
-      const offlineContext = new OfflineAudioContext({
-        numberOfChannels: this.buffer.numberOfChannels,
-        length: this.buffer.length,
-        sampleRate: this.buffer.sampleRate
-      });
-      const scriptProcessor = offlineContext.createScriptProcessor(this.bufferSize, 2, 2);
-      const offlineSource = offlineContext.createBufferSource();
-
-      this.canvas.startProcessing(this.buffer, this.bufferSize);
-      scriptProcessor.onaudioprocess = this.canvas.proccessWaveform;
-
-      offlineSource.buffer = this.buffer;
-      offlineSource.connect(scriptProcessor);
-      scriptProcessor.connect(offlineContext.destination);
-      offlineSource.start();
-      return offlineContext.startRendering().then(() => new Promise(resolve => {
-        this.canvas.drawWaveform();
-        resolve();
-      }));
-    };
-
-    this.createSource = () => {
-      this.source = audioContext.createBufferSource();
-      this.source.buffer = this.buffer;
-      this.source.connect(audioContext.destination);
-      // const scriptProcessor = audioContext.createScriptProcessor(this.bufferSize, 2, 1)
-      // scriptProcessor.onaudioprocess = this.canvas.drawPlay
-      // this.source.connect(scriptProcessor)
-      // scriptProcessor.connect(audioContext.destination)
-      // this.canvas.prepareDrawPlay()
-      this.source.onended = () => {
-        // scriptProcessor.disconnect()
-        // this.canvas.drawWaveform()
-      };
-    };
-
-    this.bufferSize = 4096;
-    this.canvas = new __WEBPACK_IMPORTED_MODULE_0__canvas__["a" /* default */](this.handleRegionSelect);
-    this.start = 0;
-    this.end = 1;
-  }
-
-}
-/* harmony export (immutable) */ __webpack_exports__["a"] = AudioThing;
 
 
 /***/ })

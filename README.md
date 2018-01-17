@@ -9,7 +9,7 @@ Users will be able to:
 * upload and play songs from their browser
 * pause, resume, restart
 * 'zoom' into sections of a song, and loop that section
-* slow down the song
+* slow down the song - [possible implementation](https://dsp.stackexchange.com/questions/40101/audio-time-stretching-without-pitch-shifting)
 
 It would be also nice to:
 

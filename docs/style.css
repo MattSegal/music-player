@@ -36,7 +36,8 @@ body {
     bottom: 0;
 }
 
-#cursor-canvas {
+#cursor-canvas,
+#frame-canvas {
     cursor: pointer;
 }
 

@@ -7,9 +7,9 @@ const audioContext = new (window.AudioContext || window.webkitAudioContext)()
 export default class AudioThing {
   constructor() {
     this.bufferSize = 4096
-    this.canvas = new Canvas(this.handleRegionSelect)
-    this.start = 0
-    this.end = 1
+    this.canvas = new Canvas(this.handleRegionSelect, this.handleFramePop)
+    this.frameStack = []
+    this.frameStack.push([0, 1]) // start, end
   }
 
   play = () => {
@@ -18,7 +18,9 @@ export default class AudioThing {
       return
     }
 
-    this.createSource()
+    // Start from the start of the current frame
+    const frame = this.frameStack[this.frameStack.length -1]
+    this.createSource(frame[0], frame[1])
     this.source.start(0)
   }
 
@@ -31,19 +33,46 @@ export default class AudioThing {
   }
 
   handleRegionSelect = (start, end) => {
-    console.log('selected', start, 'to', end)
-
-    // this.start = (this.end - this.start) * start
-    // this.end = (this.end - this.start) * end
-
-    if (this.source && audioContext.state === 'running') {
-      this.source.stop()
+    if (this.frameStack.length > 3) {
+      return
     }
+    if (end - start < 0.01) {
+      return
+    }
+    if (end > 0.96) {
+      end = 1
+    }
+    if (start < 0.04) {
+      start = 0
+    }
+    const frame = this.frameStack[this.frameStack.length -1]
+    const currentFrameSize = frame[1] - frame[0] 
+    const frameStart = frame[0] + currentFrameSize * start
+    const frameEnd = frame[0] + currentFrameSize * end
+    this.frameStack.push([frameStart, frameEnd])
+    this.canvas.drawFrameStack(this.frameStack)
 
-    this.createSource()
+    this.createSource(frameStart, frameEnd)
     this.source.loop = true
-    this.source.loopStart = this.buffer.duration * start
-    this.source.loopEnd = this.buffer.duration * end
+    this.source.loopStart = this.buffer.duration * frameStart
+    this.source.loopEnd = this.buffer.duration * frameEnd
+    this.source.start(0, this.source.loopStart)
+    this.onregionselect()
+  }
+
+  handleFramePop = () => {
+    if (this.frameStack.length < 2) {
+      return
+    }
+    this.frameStack.pop()
+    const frame = this.frameStack[this.frameStack.length -1]
+    const frameStart = frame[0]
+    const frameEnd = frame[1]
+    this.canvas.drawFrameStack(this.frameStack)
+    this.createSource(frameStart, frameEnd)
+    this.source.loop = true
+    this.source.loopStart = this.buffer.duration * frameStart
+    this.source.loopEnd = this.buffer.duration * frameEnd
     this.source.start(0, this.source.loopStart)
   }
 
@@ -76,23 +105,30 @@ export default class AudioThing {
     offlineSource.start()
     return offlineContext.startRendering().then(() => new Promise(
       resolve => {
-        this.canvas.drawWaveform()
+        this.canvas.setupDraw(0, 1)
         resolve()
     }))
   }
 
-  createSource = () => {
+  createSource = (start, end) => {
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
+    } 
+    if (this.source) {
+      this.source.stop()
+    }
     this.source = audioContext.createBufferSource()
     this.source.buffer = this.buffer
-    this.source.connect(audioContext.destination)
-    // const scriptProcessor = audioContext.createScriptProcessor(this.bufferSize, 2, 1)
-    // scriptProcessor.onaudioprocess = this.canvas.drawPlay
-    // this.source.connect(scriptProcessor)
-    // scriptProcessor.connect(audioContext.destination)
-    // this.canvas.prepareDrawPlay()
+
+    this.canvas.setupDraw(start, end)
+    const scriptProcessor = audioContext.createScriptProcessor(this.bufferSize, 2, 1)
+    scriptProcessor.onaudioprocess = this.canvas.drawPlay
+    this.source.connect(scriptProcessor)
+    scriptProcessor.connect(audioContext.destination)
+
     this.source.onended = () => {
-      // scriptProcessor.disconnect()
-      // this.canvas.drawWaveform()
+      scriptProcessor.disconnect()
+      this.canvas.redraw()
     }
   }
 }
